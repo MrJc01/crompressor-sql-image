@@ -1,0 +1,38 @@
+# Binaries
+/bin/
+/crompressor
+/crompressor-novo
+/crompressor_gui
+/basic_usage
+*.exe
+
+# Go
+vendor/
+*.test
+coverage.out
+.go-tmp/
+
+# Runtime artifacts
+*.crom
+*.cromdb
+*.sqsh
+!testdata/mini.cromdb
+*.log
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*.code-workspace
+.gemini/
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Temporary
+/tmp/
+dummy*
+*_output.bin

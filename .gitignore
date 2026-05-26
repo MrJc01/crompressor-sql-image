@@ -18,3 +18,22 @@ report_output/
 .vscode/
 .idea/
 *.tmp
+
+# Subproject crompressor-src ignores
+crompressor-src/bin/
+crompressor-src/crompressor
+crompressor-src/crompressor-novo
+crompressor-src/crompressor_gui
+crompressor-src/basic_usage
+crompressor-src/*.exe
+crompressor-src/vendor/
+crompressor-src/*.test
+crompressor-src/coverage.out
+crompressor-src/.go-tmp/
+crompressor-src/*.crom
+crompressor-src/*.sqsh
+crompressor-src/*.log
+crompressor-src/tmp/
+crompressor-src/dummy*
+crompressor-src/*_output.bin
+
