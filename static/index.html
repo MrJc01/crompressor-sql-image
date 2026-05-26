@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CROM - Painel de Transmissão de Vetores & SQLite</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+
+  <!-- Header -->
+  <header>
+    <div class="header-content">
+      <div class="logo">
+        <div class="logo-icon">C</div>
+        <div class="logo-text">
+          <h1>CROM SQL Delivery</h1>
+          <p>Painel de Transmissão & Quantização Vetorial</p>
+        </div>
+      </div>
+      <div class="status-badge">
+        <div class="status-dot"></div>
+        <span id="connection-status">Conectando ao Cérebro...</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- Centered App Container -->
+  <div class="app-container">
+    
+    <!-- Active Brain Banner Card -->
+    <div class="brain-card-horizontal">
+      <div class="brain-left">
+        <div class="brain-icon-wrapper">
+          <i class="fa-solid fa-brain"></i>
+        </div>
+        <div class="brain-info">
+          <h3>Cérebro Ativo (Codebook CROM)</h3>
+          <p id="brain-filename">codebook_4.cromdb</p>
+        </div>
+      </div>
+      <div class="brain-details-horizontal">
+        <div class="brain-detail-item">
+          <span class="detail-label">Tamanho do Codeword</span>
+          <span class="detail-value" id="brain-wordsize">48 bytes</span>
+        </div>
+        <div class="brain-detail-item">
+          <span class="detail-label">Total de Codewords</span>
+          <span class="detail-value" id="brain-wordcount">16.384</span>
+        </div>
+        <div class="brain-detail-item">
+          <span class="detail-label">Tamanho no Disco</span>
+          <span class="detail-value" id="brain-filesize">768.5 KB</span>
+        </div>
+      </div>
+      <button class="btn-download-brain" id="btn-download-brain">
+        <i class="fa-solid fa-download"></i>
+        Baixar Cérebro
+      </button>
+    </div>
+
+    <!-- Upload Section & Stored Images Grid (Unified Row) -->
+    <div class="actions-grid">
+      <!-- Upload Box -->
+      <div class="card-wrapper">
+        <div class="section-title">
+          <h3><i class="fa-solid fa-cloud-arrow-up"></i> Carregar Imagem</h3>
+        </div>
+        <div class="upload-box" id="upload-box">
+          <i class="fa-solid fa-file-image upload-icon"></i>
+          <div class="upload-text">
+            <h3>Arraste & Solte a Imagem</h3>
+            <p>Formatos PNG ou JPG de até 10MB</p>
+          </div>
+          <input type="file" id="image-input" accept="image/*">
+        </div>
+      </div>
+
+      <!-- Stored Images Gallery -->
+      <div class="card-wrapper">
+        <div class="section-title">
+          <h3><i class="fa-solid fa-database"></i> Imagens no SQLite</h3>
+          <span id="image-count" class="counter-badge">0 imagens</span>
+        </div>
+        <div class="image-gallery-container">
+          <div class="image-gallery" id="image-list">
+            <div class="canvas-placeholder" style="padding: 2.5rem; font-size: 0.85rem;">
+              <p>Nenhuma imagem salva no SQLite.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Viewer Panel -->
+    <section class="viewer-panel">
+      <div class="viewer-header">
+        <h2><i class="fa-solid fa-image"></i> Reconstrução Visual</h2>
+        <div class="active-badge" id="active-filename">
+          Exibindo Simulação Conceitual
+        </div>
+      </div>
+      
+      <div class="canvas-container">
+        <!-- Original Image Box -->
+        <div class="canvas-box">
+          <div class="canvas-box-title">
+            <span>Imagem Original</span>
+            <span class="badge" id="orig-size-badge">RGB Bruto</span>
+          </div>
+          <div class="canvas-wrapper">
+            <canvas id="canvas-original"></canvas>
+            <div class="canvas-placeholder" id="placeholder-original">
+              <i class="fa-regular fa-image"></i>
+              <p>Carregue uma imagem para comparar</p>
+            </div>
+          </div>
+        </div>
+        
+        <!-- CROM Reconstructed Canvas Box -->
+        <div class="canvas-box">
+          <div class="canvas-box-title">
+            <span>Reconstrução CROM</span>
+            <span class="badge" id="crom-size-badge" style="background-color: var(--accent-violet-glow); color: var(--accent-violet);">Payload de Índices</span>
+          </div>
+          <div class="canvas-wrapper">
+            <canvas id="canvas-reconstructed"></canvas>
+            <div class="canvas-placeholder" id="placeholder-reconstructed">
+              <i class="fa-solid fa-wand-magic-sparkles"></i>
+              <p>Aproximação por quantização vetorial</p>
+            </div>
+            <div class="canvas-loader" id="canvas-loader">
+              <div class="spinner"></div>
+              <p id="loader-text">Decodificando CROM no navegador...</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Analytics Section -->
+    <section class="analytics-grid">
+      
+      <!-- Metrics Panel -->
+      <div class="metrics-panel">
+        <h3 class="metrics-title"><i class="fa-solid fa-chart-line"></i> Mapeamento de Fidelidade</h3>
+        
+        <div class="metric-row">
+          <span class="metric-label">MSE (Erro Quadrático Médio)</span>
+          <span class="metric-value highlight-pink" id="metric-mse">-</span>
+        </div>
+        <div class="metric-progress-bar-container">
+          <div class="metric-progress-bar" id="progress-mse"></div>
+        </div>
+        
+        <div class="metric-row" style="margin-top: 1rem;">
+          <span class="metric-label">PSNR (Fidelidade de Pico)</span>
+          <span class="metric-value highlight-violet" id="metric-psnr">-</span>
+        </div>
+        <div class="metric-progress-bar-container">
+          <div class="metric-progress-bar" id="progress-psnr"></div>
+        </div>
+        
+        <div class="metric-row" style="margin-top: 1rem;">
+          <span class="metric-label">Economia CROM vs Original</span>
+          <span class="metric-value highlight-green" id="metric-savings">-</span>
+        </div>
+        <div class="metric-progress-bar-container">
+          <div class="metric-progress-bar" id="progress-savings" style="background: var(--success);"></div>
+        </div>
+      </div>
+
+      <!-- Bandwidth Bar Chart Panel -->
+      <div class="chart-panel">
+        <div class="chart-title-wrapper">
+          <h3 class="chart-title"><i class="fa-solid fa-network-wired"></i> Tráfego de Rede (Primeira vs. Subsequentes)</h3>
+          <span id="chart-simulation-badge" class="simulation-badge">Simulação Conceitual (512x512)</span>
+        </div>
+
+        <div class="bar-chart-container">
+          
+          <!-- Raw Pixels -->
+          <div class="chart-bar-row">
+            <div class="chart-bar-info">
+              <span class="chart-bar-name">
+                <span class="chart-bar-color-dot" style="background-color: #666;"></span>
+                RGB Bruto (Sem Compressão)
+              </span>
+              <span id="chart-size-raw">-</span>
+            </div>
+            <div class="chart-bar-outer">
+              <div class="chart-bar-inner original" id="bar-raw"></div>
+            </div>
+          </div>
+
+          <!-- WebP -->
+          <div class="chart-bar-row">
+            <div class="chart-bar-info">
+              <span class="chart-bar-name">
+                <span class="chart-bar-color-dot" style="background-color: #17a2b8;"></span>
+                WebP Padrão
+              </span>
+              <span id="chart-size-webp">-</span>
+            </div>
+            <div class="chart-bar-outer">
+              <div class="chart-bar-inner webp" id="bar-webp"></div>
+            </div>
+          </div>
+
+          <!-- Base64 payload -->
+          <div class="chart-bar-row">
+            <div class="chart-bar-info">
+              <span class="chart-bar-name">
+                <span class="chart-bar-color-dot" style="background-color: var(--accent-pink);"></span>
+                Texto Base64 (Inline HTML)
+              </span>
+              <span id="chart-size-base64">-</span>
+            </div>
+            <div class="chart-bar-outer">
+              <div class="chart-bar-inner base64" id="bar-base64"></div>
+            </div>
+          </div>
+
+          <!-- CROM First Visit -->
+          <div class="chart-bar-row">
+            <div class="chart-bar-info">
+              <span class="chart-bar-name">
+                <span class="chart-bar-color-dot" style="background-color: #a12b93;"></span>
+                CROM (Primeira Visita - Baixa Dicionário)
+              </span>
+              <span id="chart-size-crom-first">-</span>
+            </div>
+            <div class="chart-bar-outer">
+              <div class="chart-bar-inner crom-uncached" id="bar-crom-first"></div>
+            </div>
+          </div>
+
+          <!-- CROM Subsequent Visit -->
+          <div class="chart-bar-row">
+            <div class="chart-bar-info">
+              <span class="chart-bar-name">
+                <span class="chart-bar-color-dot" style="background-color: var(--success);"></span>
+                CROM (Visitas Subsequentes - Cache Ativo)
+                <span class="chart-bar-saving-tag" id="saving-tag-percentage">0% ECONOMIZADO</span>
+              </span>
+              <span id="chart-size-crom-cached">-</span>
+            </div>
+            <div class="chart-bar-outer">
+              <div class="chart-bar-inner crom-cached" id="bar-crom-cached"></div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+    </section>
+
+    <!-- Guia Educativo Section -->
+    <section class="educational-section">
+      <div class="educational-header">
+        <h2><i class="fa-solid fa-graduation-cap"></i> Como Funciona o CROM SQL Delivery?</h2>
+        <p>Entenda a engenharia por trás do carregamento instantâneo de imagens e economia extrema de largura de banda.</p>
+      </div>
+      
+      <div class="educational-tabs">
+        <button class="tab-btn active" data-tab="tab-quantization">Quantização Vetorial</button>
+        <button class="tab-btn" data-tab="tab-lsh">Busca LSH & SSD</button>
+        <button class="tab-btn" data-tab="tab-caching">Cache do Dicionário</button>
+        <button class="tab-btn" data-tab="tab-flow">Compressão Local</button>
+      </div>
+      
+      <div class="educational-content">
+        <!-- Quantização Vetorial -->
+        <div class="tab-content active" id="tab-quantization">
+          <h4>1. Divisão Espacial e Codificação por Índices</h4>
+          <p>O sistema divide a imagem em blocos espaciais não sobrepostos (de <strong>4x4 pixels</strong> no codebook ativo). Cada bloco contém 16 pixels com canais de cores Vermelho, Verde e Azul (RGB), totalizando <strong>48 dimensões de dados de cor</strong>.</p>
+          <p>Em vez de transmitir os 48 bytes de cor brutos para cada bloco, o codificador consulta o <strong>Dicionário Visual ("Cérebro")</strong> para encontrar o padrão mais parecido e transmite apenas o seu <strong>índice de 16 bits (2 bytes)</strong>.</p>
+          <div class="edu-stat-box">
+            <span class="edu-stat-label">Taxa de Compressão Estática por Bloco:</span>
+            <span class="edu-stat-value highlight-green">24x de Economia Estática (95.8% de redução na rede)</span>
+          </div>
+        </div>
+        
+        <!-- LSH & Busca SSD -->
+        <div class="tab-content" id="tab-lsh">
+          <h4>2. Indexação Rápida LSH & Salvaguarda Linear (SSD)</h4>
+          <p>Para buscar o padrão mais próximo em tempo real no navegador sem congelar a tela (pesquisar em 16.384 codewords para milhares de blocos), o JavaScript constrói em memória um índice <strong>LSH (Locality Sensitive Hashing)</strong>. Ele agrupa os padrões em baldes (buckets) baseando-se nos tons do primeiro pixel do bloco.</p>
+          <p><strong>Limiar Dinâmico e Fidelidade Visual:</strong> Se a busca no balde LSH retornar um erro <strong>SSD (Soma dos Desvios Quadráticos)</strong> superior a <strong>1.000</strong>, o navegador realiza automaticamente um fallback para a <strong>Busca Linear Exaustiva</strong>. Isso garante fidelidade extrema nas transições e bordas diagonais de logotipos e textos, removendo ruídos indesejados.</p>
+        </div>
+        
+        <!-- Caching -->
+        <div class="tab-content" id="tab-caching">
+          <h4>3. Transmissão Híbrida: Primeira vs. Visitas Subsequentes</h4>
+          <p>A grande sacada de largura de banda deste sistema é a separação lógica na rede:</p>
+          <ul>
+            <li><strong>Primeira Visita:</strong> O navegador baixa a página, o payload de índices da imagem e o dicionário de padrões visual (<strong>Cérebro</strong>, ~768 KB). O cérebro é armazenado localmente em formato Base64 no <strong>localStorage</strong>.</li>
+            <li><strong>Visitas Subsequentes:</strong> O navegador faz uma chamada ultra-rápida do tipo <strong>HTTP HEAD</strong> para verificar a data de modificação e tamanho do dicionário. Se o dicionário não foi alterado no servidor, o navegador carrega a versão armazenada no <strong>localStorage</strong> e faz o download de <strong>apenas ~1 KB</strong> de índices (gzipped CROM) para desenhar a imagem!</li>
+          </ul>
+          <div class="edu-stat-box" style="margin-top: 0.75rem;">
+            <span class="edu-stat-label">Redução de Banda em Visitas Subsequentes:</span>
+            <span class="edu-stat-value highlight-violet">Economia de ~77% a 90% em comparação ao formato WebP</span>
+          </div>
+        </div>
+        
+        <!-- Fluxo Local-First -->
+        <div class="tab-content" id="tab-flow">
+          <h4>4. Processamento Concorrente Client-Side & SQL</h4>
+          <p>O processamento ocorre totalmente na máquina do cliente, aliviando o uso de CPU do servidor:</p>
+          <ol>
+            <li>Você carrega uma imagem no navegador. O Javascript a quantiza localmente utilizando LSH.</li>
+            <li>O payload de índices binários gerados localmente é codificado em Base64 e enviado via rota JSON POST para gravação direta no SQLite.</li>
+            <li>O navegador baixa a imagem do banco para verificação e desenha o resultado em um elemento <strong>Canvas HTML5</strong> escrevendo os pixels de forma contígua na memória do canvas, atingindo performance de renderização de frações de milissegundo.</li>
+          </ol>
+        </div>
+      </div>
+    </section>
+
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,20 @@
+# Binaries
+crompressor-sql-image
+
+# SQLite Database
+*.db
+images.db
+
+# Generated image datasets (avoid committing large binary directories)
+training_dataset/
+testing_dataset/
+
+# Test output results
+tests/results/
+report_output/
+
+# OS/IDE temporary files
+.DS_Store
+.vscode/
+.idea/
+*.tmp
