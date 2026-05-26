@@ -6,6 +6,7 @@ let lshBuckets = null;
 let activeImage = null;
 let imagesList = [];
 let activePayloadBuffer = null;
+let isServerlessMode = false;
 
 // DOM Elements
 const uploadBox = document.getElementById('upload-box');
@@ -84,8 +85,70 @@ function setupEventListeners() {
   });
 
   btnDownloadBrain.addEventListener('click', () => {
-    window.location.href = '/api/codebook';
+    if (isServerlessMode) {
+      if (codebookData) {
+        const blob = new Blob([codebookData], { type: 'application/octet-stream' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = brainFilenameEl.textContent || 'codebook_4.cromdb';
+        a.click();
+        URL.revokeObjectURL(url);
+      } else {
+        alert('Nenhum dicionário carregado para download.');
+      }
+    } else {
+      window.location.href = '/api/codebook';
+    }
   });
+
+  // Manual codebook upload handlers (Serverless fallback)
+  const btnUploadBrain = document.getElementById('btn-upload-brain');
+  const codebookFileInput = document.getElementById('codebook-file-input');
+  
+  if (btnUploadBrain && codebookFileInput) {
+    btnUploadBrain.addEventListener('click', () => {
+      codebookFileInput.click();
+    });
+
+    codebookFileInput.addEventListener('change', (e) => {
+      if (e.target.files.length > 0) {
+        const file = e.target.files[0];
+        loaderText.textContent = 'Carregando cérebro local...';
+        canvasLoader.classList.add('active');
+        
+        const reader = new FileReader();
+        reader.onload = (event) => {
+          try {
+            const buffer = event.target.result;
+            if (processAndLoadCodebook(buffer, file.name)) {
+              btnUploadBrain.style.background = 'linear-gradient(135deg, #00b0ff, #00e5ff)';
+              btnUploadBrain.style.boxShadow = '0 4px 15px rgba(0, 229, 255, 0.3)';
+              btnUploadBrain.innerHTML = '<i class="fa-solid fa-check"></i> Cérebro Carregado';
+              if (brainFilenameEl) {
+                brainFilenameEl.style.color = '';
+              }
+              
+              try {
+                const base64Data = arrayBufferToBase64(buffer);
+                localStorage.setItem('crom_codebook_data', base64Data);
+                localStorage.setItem('crom_codebook_version', 'serverless_codebook_v4');
+              } catch (err) {
+                console.warn('LocalStorage quota exceeded, using in-memory only:', err);
+              }
+              
+              refreshImagesList();
+            }
+          } catch (err) {
+            alert('Falha ao processar arquivo CROMDB: ' + err.message);
+          } finally {
+            canvasLoader.classList.remove('active');
+          }
+        };
+        reader.readAsArrayBuffer(file);
+      }
+    });
+  }
 
   // Manipulador de abas do Guia Educativo
   document.querySelectorAll('.tab-btn').forEach(btn => {
@@ -113,54 +176,10 @@ function formatBytes(bytes, decimals = 2) {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
 }
 
-// Load and Parse the CROM Codebook ("Brain")
-async function loadCodebook() {
-  connectionStatusEl.textContent = 'Conectando ao Cérebro...';
-  connectionStatusEl.style.color = 'var(--warning)';
-  
+// Parse, index and configure the loaded codebook buffer
+function processAndLoadCodebook(buffer, filename = 'codebook_4.cromdb') {
   try {
-    // 1. Obter cabeçalhos via HEAD para verificar versão do Codebook no servidor
-    console.log('Verificando versão do Cérebro no servidor...');
-    const headResponse = await fetch('/api/codebook', { method: 'HEAD' });
-    if (!headResponse.ok) throw new Error('Falha ao consultar metadados do Cérebro');
-    
-    const lastModified = headResponse.headers.get('Last-Modified') || '';
-    const contentLength = headResponse.headers.get('Content-Length') || '';
-    const versionKey = `version_${lastModified}_${contentLength}`;
-    
-    let buffer = null;
-    const cachedVersion = localStorage.getItem('crom_codebook_version');
-    const cachedData = localStorage.getItem('crom_codebook_data');
-    
-    if (cachedVersion === versionKey && cachedData) {
-      console.log('Cérebro carregado do cache (localStorage)...');
-      connectionStatusEl.textContent = 'Lendo do cache local...';
-      buffer = base64ToArrayBuffer(cachedData);
-    } else {
-      console.log('Cérebro desatualizado ou ausente no cache local. Baixando...');
-      connectionStatusEl.textContent = 'Baixando Cérebro...';
-      
-      const response = await fetch('/api/codebook');
-      if (!response.ok) throw new Error('Cérebro não encontrado no servidor');
-      
-      buffer = await response.arrayBuffer();
-      
-      try {
-        const base64Data = arrayBufferToBase64(buffer);
-        localStorage.setItem('crom_codebook_data', base64Data);
-        localStorage.setItem('crom_codebook_version', versionKey);
-        console.log('Dicionário CROM cacheado com sucesso no localStorage.');
-      } catch (e) {
-        console.warn('Erro ao persistir no localStorage (cota de armazenamento excedida):', e);
-      }
-    }
-    
-    codebookData = buffer;
-    
-    // Parse Binary Header (512 bytes)
     const view = new DataView(buffer);
-    
-    // Magic: bytes 0..5
     let magic = '';
     for (let i = 0; i < 6; i++) {
       magic += String.fromCharCode(view.getUint8(i));
@@ -183,10 +202,9 @@ async function loadCodebook() {
       dataOffset: Number(dataOffset)
     };
 
-    // Create a view on the codewords data
+    codebookData = buffer;
     codewordsView = new Uint8Array(buffer, codebookHeader.dataOffset);
     
-    // Build LSH index in memory
     const tLsh0 = performance.now();
     lshBuckets = new Map();
     const count = codebookHeader.codewordCount;
@@ -203,29 +221,148 @@ async function loadCodebook() {
     }
     console.log(`Índice LSH criado em ${(performance.now() - tLsh0).toFixed(2)}ms com ${lshBuckets.size} baldes`);
     
-    // Update UI
     brainWordsizeEl.textContent = `${codewordSize} bytes`;
     brainWordcountEl.textContent = codebookHeader.codewordCount.toLocaleString();
     brainFilesizeEl.textContent = formatBytes(buffer.byteLength);
+    if (brainFilenameEl) {
+      brainFilenameEl.textContent = filename;
+      brainFilenameEl.style.color = '';
+    }
     
-    connectionStatusEl.textContent = 'Cérebro Conectado & Cached';
+    connectionStatusEl.textContent = isServerlessMode ? 'Cérebro Conectado (Sem Servidor)' : 'Cérebro Conectado & Cached';
     connectionStatusEl.parentNode.querySelector('.status-dot').style.backgroundColor = 'var(--success)';
     
     console.log('Cérebro carregado com sucesso:', codebookHeader);
+    
+    const btnUpload = document.getElementById('btn-upload-brain');
+    if (btnUpload) {
+      btnUpload.style.display = 'none';
+    }
+    
+    return true;
   } catch (err) {
-    console.error(err);
-    connectionStatusEl.textContent = 'Falha de Conexão com o Cérebro';
+    console.error('Erro ao processar codebook:', err);
+    connectionStatusEl.textContent = 'Falha ao processar Cérebro';
     connectionStatusEl.parentNode.querySelector('.status-dot').style.backgroundColor = 'var(--error)';
+    alert('Erro ao processar arquivo do dicionário CROM: ' + err.message);
+    return false;
   }
 }
 
-// Refresh list of images from SQLite database
+function showManualCodebookOption() {
+  const btnUpload = document.getElementById('btn-upload-brain');
+  if (btnUpload) {
+    btnUpload.style.display = 'inline-flex';
+  }
+  if (brainFilenameEl) {
+    brainFilenameEl.textContent = 'Por favor, carregue um arquivo codebook_4.cromdb manualmente';
+    brainFilenameEl.style.color = 'var(--warning)';
+  }
+}
+
+// Load and Parse the CROM Codebook ("Brain")
+async function loadCodebook() {
+  connectionStatusEl.textContent = 'Conectando ao Cérebro...';
+  connectionStatusEl.style.color = 'var(--warning)';
+  
+  try {
+    console.log('Verificando versão do Cérebro no servidor...');
+    let headResponse = null;
+    try {
+      headResponse = await fetch('/api/codebook', { method: 'HEAD' });
+      if (!headResponse.ok) throw new Error();
+    } catch (e) {
+      console.log('Backend não respondeu ou indisponível. Entrando em modo Serverless...');
+      isServerlessMode = true;
+    }
+    
+    let buffer = null;
+    let filename = 'codebook_4.cromdb';
+    
+    if (isServerlessMode) {
+      const versionKey = 'serverless_codebook_v4';
+      const cachedVersion = localStorage.getItem('crom_codebook_version');
+      const cachedData = localStorage.getItem('crom_codebook_data');
+      
+      if (cachedVersion === versionKey && cachedData) {
+        console.log('Cérebro carregado do cache local (localStorage)...');
+        connectionStatusEl.textContent = 'Lendo do cache local...';
+        buffer = base64ToArrayBuffer(cachedData);
+      } else {
+        console.log('Tentando baixar Cérebro via rota estática (Serverless)...');
+        connectionStatusEl.textContent = 'Baixando Cérebro...';
+        
+        try {
+          const response = await fetch('./codebook_4.cromdb');
+          if (!response.ok) throw new Error();
+          buffer = await response.arrayBuffer();
+          
+          try {
+            const base64Data = arrayBufferToBase64(buffer);
+            localStorage.setItem('crom_codebook_data', base64Data);
+            localStorage.setItem('crom_codebook_version', versionKey);
+            console.log('Dicionário CROM cacheado no localStorage.');
+          } catch (e) {
+            console.warn('Erro ao persistir no localStorage:', e);
+          }
+        } catch (fetchErr) {
+          console.warn('Cérebro estático não encontrado. Aguardando seleção manual.');
+          showManualCodebookOption();
+          throw new Error('Por favor, carregue o dicionário CROM manualmente.');
+        }
+      }
+    } else {
+      const lastModified = headResponse.headers.get('Last-Modified') || '';
+      const contentLength = headResponse.headers.get('Content-Length') || '';
+      const versionKey = `version_${lastModified}_${contentLength}`;
+      
+      const cachedVersion = localStorage.getItem('crom_codebook_version');
+      const cachedData = localStorage.getItem('crom_codebook_data');
+      
+      if (cachedVersion === versionKey && cachedData) {
+        console.log('Cérebro carregado do cache (localStorage)...');
+        connectionStatusEl.textContent = 'Lendo do cache local...';
+        buffer = base64ToArrayBuffer(cachedData);
+      } else {
+        console.log('Cérebro desatualizado ou ausente no cache local. Baixando...');
+        connectionStatusEl.textContent = 'Baixando Cérebro...';
+        
+        const response = await fetch('/api/codebook');
+        if (!response.ok) throw new Error('Cérebro não encontrado no servidor');
+        
+        buffer = await response.arrayBuffer();
+        
+        try {
+          const base64Data = arrayBufferToBase64(buffer);
+          localStorage.setItem('crom_codebook_data', base64Data);
+          localStorage.setItem('crom_codebook_version', versionKey);
+          console.log('Dicionário CROM cacheado no localStorage.');
+        } catch (e) {
+          console.warn('Erro ao persistir no localStorage:', e);
+        }
+      }
+    }
+    
+    processAndLoadCodebook(buffer, filename);
+  } catch (err) {
+    console.error(err);
+    connectionStatusEl.textContent = isServerlessMode ? 'Cérebro Desconectado (Carregar Local)' : 'Falha de Conexão com o Cérebro';
+    connectionStatusEl.parentNode.querySelector('.status-dot').style.backgroundColor = 'var(--error)';
+    showManualCodebookOption();
+  }
+}
+
+// Refresh list of images from SQLite database or localStorage if Serverless
 async function refreshImagesList() {
   try {
-    const response = await fetch('/api/images');
-    if (!response.ok) throw new Error('Failed to load images from server');
+    if (isServerlessMode) {
+      imagesList = JSON.parse(localStorage.getItem('crom_stored_images') || '[]');
+    } else {
+      const response = await fetch('/api/images');
+      if (!response.ok) throw new Error('Failed to load images from server');
+      imagesList = await response.json();
+    }
     
-    imagesList = await response.json();
     imageCountEl.textContent = `${imagesList.length} image(s)`;
     
     // Render list
@@ -233,7 +370,7 @@ async function refreshImagesList() {
     if (imagesList.length === 0) {
       imageListEl.innerHTML = `
         <div class="canvas-placeholder" style="padding: 1.5rem; font-size: 0.8rem;">
-          <p>No images in SQLite.</p>
+          <p>Nenhuma imagem no banco local.</p>
         </div>
       `;
       return;
@@ -252,7 +389,7 @@ async function refreshImagesList() {
           <span class="image-details">${img.width}x${img.height} • CROM: ${formatBytes(img.crom_size)}</span>
         </div>
         <div class="image-actions">
-          <button title="Delete record" class="btn-delete" data-id="${img.id}">
+          <button title="Excluir registro" class="btn-delete" data-id="${img.id}">
             <i class="fa-solid fa-trash-can"></i>
           </button>
         </div>
@@ -303,7 +440,12 @@ async function selectImage(imgMeta) {
 
   // 1. Draw Original Image
   const origImg = new Image();
-  origImg.src = `/api/images/${imgMeta.id}/original`;
+  if (isServerlessMode) {
+    origImg.src = 'data:image/jpeg;base64,' + imgMeta.base64_payload;
+  } else {
+    origImg.src = `/api/images/${imgMeta.id}/original`;
+  }
+  
   origImg.onload = async () => {
     canvasOriginal.width = imgMeta.width;
     canvasOriginal.height = imgMeta.height;
@@ -317,12 +459,16 @@ async function selectImage(imgMeta) {
     }
 
     // 2. Fetch and Decode CROM indices payload
-    loaderText.textContent = 'Baixando payload CROM...';
+    loaderText.textContent = 'Preparando payload CROM...';
     try {
-      const payloadResp = await fetch(`/api/images/${imgMeta.id}`);
-      if (!payloadResp.ok) throw new Error('Falha ao baixar payload CROM');
-      
-      const payloadBuffer = await payloadResp.arrayBuffer();
+      let payloadBuffer;
+      if (isServerlessMode) {
+        payloadBuffer = base64ToArrayBuffer(imgMeta.crom_payload);
+      } else {
+        const payloadResp = await fetch(`/api/images/${imgMeta.id}`);
+        if (!payloadResp.ok) throw new Error('Falha ao baixar payload CROM');
+        payloadBuffer = await payloadResp.arrayBuffer();
+      }
       
       loaderText.textContent = 'Decodificando CROM localmente...';
       const startTime = performance.now();
@@ -758,14 +904,10 @@ async function uploadImage(file) {
         };
         updateMetricsAndCharts(tempImgMeta);
         
-        // Upload the locally generated CROM vectors to the server
-        loaderText.textContent = 'Enviando vetores para o SQLite...';
-        const response = await fetch('/api/images', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
+        if (isServerlessMode) {
+          loaderText.textContent = 'Salvando localmente no localStorage...';
+          const newImgMeta = {
+            id: 'local_' + Date.now(),
             name: file.name,
             width: compressed.width,
             height: compressed.height,
@@ -774,39 +916,85 @@ async function uploadImage(file) {
             original_size: originalSize,
             base64_size: base64Size,
             jpeg_size: jpegSize,
-            webp_size: webpSize
-          })
-        });
-        
-        if (!response.ok) {
-          const errText = await response.text();
-          throw new Error(errText || 'Falha ao salvar payload pré-comprimido no servidor');
+            webp_size: webpSize,
+            crom_size: compressed.indices.byteLength
+          };
+          
+          try {
+            const localImages = JSON.parse(localStorage.getItem('crom_stored_images') || '[]');
+            localImages.push(newImgMeta);
+            localStorage.setItem('crom_stored_images', JSON.stringify(localImages));
+          } catch (storageErr) {
+            console.warn('LocalStorage limit exceeded, proceeding in-memory:', storageErr);
+            alert('Aviso: O armazenamento local está cheio. A imagem foi comprimida na tela, mas não pôde ser salva de forma persistente.');
+          }
+          
+          console.log('Salvo no localStorage:', newImgMeta);
+          
+          loaderText.textContent = 'Reconstruindo vetores locais...';
+          const localBuffer = base64ToArrayBuffer(newImgMeta.crom_payload);
+          decompressCROM(localBuffer, newImgMeta.width, newImgMeta.height, isGrayscale);
+          
+          updateMetricsAndCharts(newImgMeta);
+          console.log('Compressão e validação concluídas!');
+          
+          activeFilenameEl.textContent = `${newImgMeta.name} (${newImgMeta.width}x${newImgMeta.height}) [Local]`;
+          if (isGrayscale) {
+            activeFilenameEl.textContent += ' [Tons de Cinza]';
+          }
+          await refreshImagesList();
+          activeImage = newImgMeta;
+        } else {
+          // Upload the locally generated CROM vectors to the server
+          loaderText.textContent = 'Enviando vetores para o SQLite...';
+          const response = await fetch('/api/images', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              name: file.name,
+              width: compressed.width,
+              height: compressed.height,
+              crom_payload: cromPayloadBase64,
+              base64_payload: base64Payload,
+              original_size: originalSize,
+              base64_size: base64Size,
+              jpeg_size: jpegSize,
+              webp_size: webpSize
+            })
+          });
+          
+          if (!response.ok) {
+            const errText = await response.text();
+            throw new Error(errText || 'Falha ao salvar payload pré-comprimido no servidor');
+          }
+          
+          const newImgMeta = await response.json();
+          console.log('Salvo no SQLite. Iniciando download de verificação...', newImgMeta);
+          
+          // Verification step: download vectors back from server
+          loaderText.textContent = 'Baixando vetores salvos para validação...';
+          const verifyResp = await fetch(`/api/images/${newImgMeta.id}`);
+          if (!verifyResp.ok) throw new Error('Falha ao baixar vetores para verificação');
+          
+          const verifiedBuffer = await verifyResp.arrayBuffer();
+          
+          // Decompress the downloaded vectors
+          loaderText.textContent = 'Reconstruindo vetores baixados...';
+          decompressCROM(verifiedBuffer, newImgMeta.width, newImgMeta.height, isGrayscale);
+          
+          // Verify visual likeness and calculate definitive metrics
+          updateMetricsAndCharts(newImgMeta);
+          console.log('Upload e verificação CROM concluídos com sucesso!');
+          
+          activeFilenameEl.textContent = `${newImgMeta.name} (${newImgMeta.width}x${newImgMeta.height}) [Verificado]`;
+          if (isGrayscale) {
+            activeFilenameEl.textContent += ' [Tons de Cinza]';
+          }
+          await refreshImagesList();
+          activeImage = newImgMeta;
         }
-        
-        const newImgMeta = await response.json();
-        console.log('Salvo no SQLite. Iniciando download de verificação...', newImgMeta);
-        
-        // Verification step: download vectors back from server
-        loaderText.textContent = 'Baixando vetores salvos para validação...';
-        const verifyResp = await fetch(`/api/images/${newImgMeta.id}`);
-        if (!verifyResp.ok) throw new Error('Falha ao baixar vetores para verificação');
-        
-        const verifiedBuffer = await verifyResp.arrayBuffer();
-        
-        // Decompress the downloaded vectors
-        loaderText.textContent = 'Reconstruindo vetores baixados...';
-        decompressCROM(verifiedBuffer, newImgMeta.width, newImgMeta.height, isGrayscale);
-        
-        // Verify visual likeness and calculate definitive metrics
-        updateMetricsAndCharts(newImgMeta);
-        console.log('Upload e verificação CROM concluídos com sucesso!');
-        
-        activeFilenameEl.textContent = `${newImgMeta.name} (${newImgMeta.width}x${newImgMeta.height}) [Verificado]`;
-        if (isGrayscale) {
-          activeFilenameEl.textContent += ' [Tons de Cinza]';
-        }
-        await refreshImagesList();
-        activeImage = newImgMeta;
       } catch (err) {
         console.error(err);
         alert('Upload e verificação falharam: ' + err.message);
@@ -821,16 +1009,23 @@ async function uploadImage(file) {
 
 // Delete image record
 async function deleteImage(id) {
-  if (!confirm('Are you sure you want to delete this image?')) return;
+  if (!confirm('Deseja realmente excluir esta imagem?')) return;
   
   try {
-    const response = await fetch(`/api/images/${id}`, {
-      method: 'DELETE'
-    });
+    if (isServerlessMode) {
+      const localImages = JSON.parse(localStorage.getItem('crom_stored_images') || '[]');
+      const filtered = localImages.filter(img => img.id !== id);
+      localStorage.setItem('crom_stored_images', JSON.stringify(filtered));
+      console.log('Image deleted locally:', id);
+    } else {
+      const response = await fetch(`/api/images/${id}`, {
+        method: 'DELETE'
+      });
 
-    if (!response.ok) throw new Error('Failed to delete image');
-    
-    console.log('Image deleted:', id);
+      if (!response.ok) throw new Error('Failed to delete image');
+      console.log('Image deleted from server:', id);
+    }
+
     if (activeImage && activeImage.id === id) {
       activeImage = null;
       resetViewer();
