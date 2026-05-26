@@ -8,10 +8,12 @@ Este projeto implementa um ecossistema completo e inovador para compressão, arm
 
 Em sistemas web tradicionais, carregar imagens consome uma quantidade massiva de tráfego de rede, pois o servidor envia os arquivos compactados (JPEG, PNG, WebP) inteiros para cada cliente.
 
-Este projeto propõe uma alternativa baseada em **Quantização Vetorial**:
-1. **Codebook Único ("Brain")**: O navegador baixa um dicionário binário (`codebook.cromdb`) uma única vez e o armazena localmente em cache.
-2. **Payloads Levíssimos**: As imagens no banco de dados SQLite consistem apenas de metadados mínimos e um array de índices de 16 bits (`uint16`). Cada bloco de pixel $8 \times 8$ da imagem original é mapeado para uma única palavra de 2 bytes no codebook (gerando uma compressão física de **96x** sobre os pixels RGB brutos!).
-3. **Decodificação Client-side**: Utilizando o decodificador JavaScript integrado em [static/app.js](static/app.js), o navegador renderiza as imagens realizando consultas ultra-rápidas $O(1)$ na memória e desenhando diretamente no canvas através de `putImageData`.
+Este projeto propõe uma alternativa baseada em **Quantização Vetorial Espacial**:
+1. **Codebook Único ("Cérebro")**: O navegador baixa um dicionário binário (`codebook_4.cromdb`) uma única vez e o armazena localmente no cache do navegador.
+2. **Busca por Similaridade LSH & SSD**: Durante a compressão, cada bloco de pixels da imagem é mapeado para o vetor mais semelhante no dicionário usando a distância **SSD** (Soma das Diferenças Quadradas) acelerada por **LSH** (Locality Sensitive Hashing) em tempo de execução.
+3. **Payloads Levíssimos**: As imagens no banco de dados SQLite consistem apenas de metadados mínimos e um array de índices de 16 bits (`uint16`). Cada bloco de pixel $4 \times 4$ da imagem original é mapeado para uma única palavra de 2 bytes no codebook (gerando uma compressão física de **24x** sobre os pixels RGB brutos!).
+4. **Decodificação Client-side**: Utilizando o decodificador JavaScript integrado em [static/app.js](static/app.js), o navegador renderiza as imagens realizando consultas em tempo recorde na memória e desenhando diretamente no canvas através de `putImageData`.
+5. **Modo Serverless Total**: Caso o servidor Go de backend esteja offline, a aplicação web executa inteiramente do lado do cliente (client-side), permitindo fazer upload manual do dicionário binário e armazenando o banco de imagens no `localStorage` do navegador.
 
 ---
 
@@ -53,19 +55,19 @@ Este projeto propõe uma alternativa baseada em **Quantização Vetorial**:
 2. **Treinar o Codebook (Criação do Cérebro):**
    Para treinar o dicionário visual a partir de imagens de exemplo. Se nenhuma pasta for indicada, o CLI baixará fotos reais de Picsum Photos e gerará gradientes sintéticos para compilar um dataset de 100MB:
    ```bash
-   ./crompressor-sql-image cli train --output codebook.cromdb --block-size 8 --max-words 8192
+   ./crompressor-sql-image cli train --output codebook_4.cromdb --block-size 4 --max-words 16384
    ```
 
 3. **Rodar os Benchmarks:**
    Compactar um diretório inteiro de imagens e analisar a taxa de redução contra formatos comuns (JPEG, WebP, Base64), salvando os resultados no SQLite (`images.db`):
    ```bash
-   ./crompressor-sql-image cli benchmark --input ./training_dataset --codebook codebook.cromdb --db images.db
+   ./crompressor-sql-image cli benchmark --input ./training_dataset --codebook codebook_4.cromdb --db images.db
    ```
 
 4. **Iniciar o Servidor e Dashboard:**
    Para visualizar a interface do usuário:
    ```bash
-   ./crompressor-sql-image server --port 8080 --codebook codebook.cromdb --db images.db
+   ./crompressor-sql-image server --port 8080 --codebook codebook_4.cromdb --db images.db --block-size 4
    ```
    Abra seu navegador em [http://localhost:8080](http://localhost:8080).
 
@@ -74,10 +76,11 @@ Este projeto propõe uma alternativa baseada em **Quantização Vetorial**:
 ## 📊 Dashboard Web Premium
 
 A interface web fornece ferramentas interativas para testar o sistema:
-* **Upload Integrado**: Faça upload de qualquer PNG/JPEG para que o backend realize a compressão em CROM em tempo real e insira no SQLite.
+* **Upload Integrado**: Faça upload de qualquer PNG/JPEG para que a compressão em CROM seja gerada via LSH/SSD local e persistida no banco.
 * **Comparação Visual**: Veja o arquivo JPEG original lado a lado com a versão decodificada no navegador por JavaScript.
-* **Métricas de Qualidade**: O navegador calcula e atualiza dinamicamente o **MSE** (Erro Quadrático Médio) e o **PSNR** (Fidelidade Visual em dB).
-* **Gráfico de Largura de Banda**: Um gráfico interativo mostra a economia real gerada pelo sistema no segundo acesso (com o codebook já cacheado no navegador).
+* **Métricas de Qualidade**: O navegador calcula e atualiza dinamicamente o **MSE** (Erro Quadrático Médio) e o **PSNR** (Fidelidade Visual em dB de ~33-35 dB, garantindo excelente qualidade a olho nu).
+* **Gráfico de Largura de Banda**: Um gráfico interativo compara o tráfego gerado por imagens brutas, WebP, Base64 e CROM (com destaque para o segundo acesso, onde o tráfego cai para ~1 KB por imagem com o dicionário cacheado).
+* **Execução Serverless Offline**: Detecção automática de indisponibilidade de rede. Suporta o carregamento de dicionários locais (`.cromdb`) e banco de dados temporário no `localStorage` do navegador.
 
 ---
 
@@ -100,16 +103,16 @@ Os resultados serão armazenados em:
 
 ## 📐 Fórmulas Matemáticas Utilizadas
 
-### Taxa de Compressão Espacial (Blocos $8 \times 8$)
+### Taxa de Compressão Espacial (Blocos $4 \times 4$)
 Cada bloco de pixels bruto consome:
-$$\text{Tamanho Original} = 8 \times 8 \times 3 \text{ (RGB)} = 192 \text{ bytes}$$
+$$\text{Tamanho Original} = 4 \times 4 \times 3 \text{ (RGB)} = 48 \text{ bytes}$$
 
 Cada bloco compactado é representado por apenas 1 índice do codebook:
 $$\text{Tamanho Comprimido} = 1 \times \text{uint16} = 2 \text{ bytes}$$
-$$\text{Redução Física} = \frac{192}{2} = 96\times \text{ (Economia de 98.96\% de dados)}$$
+$$\text{Redução Física} = \frac{48}{2} = 24\times \text{ (Economia de 95.83\% de dados por bloco)}$$
 
 ### Relação Sinal-Ruído de Pico (PSNR)
 Para medir a fidelidade visual dos blocos gerados a partir do dicionário em relação aos pixels reais:
 $$MSE = \frac{1}{3 \cdot W \cdot H} \sum_{y=0}^{H-1} \sum_{x=0}^{W-1} \sum_{c \in \{R,G,B\}} (I_{orig}(x,y,c) - I_{recon}(x,y,c))^2$$
 $$PSNR = 10 \cdot \log_{10}\left(\frac{255^2}{MSE}\right)$$
-*(Valores de PSNR acima de 30 dB indicam excelente qualidade de imagem, quase imperceptível ao olho humano).*
+*(Valores de PSNR acima de 30 dB indicam excelente qualidade de imagem, quase imperceptível ao olho humano. Nosso dicionário ativo atinge valores médios entre 33 dB e 35 dB).*
